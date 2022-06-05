@@ -289,6 +289,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val ctrl_killd = Wire(Bool())
   val id_npc = (ibuf.io.pc.asSInt + ImmGen(IMM_UJ, id_inst(0))).asUInt
 
+  //SM: add store queue
+  var numStqEntries = 8.U
+  val stq = Reg(Vec(numStqEntries, Valid(new STQEntry)))
+
   val csr = Module(new CSRFile(perfEvents, coreParams.customCSRs.decls))
   val id_csr_en = id_ctrl.csr.isOneOf(CSR.S, CSR.C, CSR.W)
   val id_system_insn = id_ctrl.csr === CSR.I
@@ -1097,4 +1101,14 @@ object ImmGen {
 
     Cat(sign, b30_20, b19_12, b11, b10_5, b4_1, b0).asSInt
   }
+}
+
+class STQEntry(implicit p: Parameters)
+{
+  val addr                = Valid(UInt)
+  // val addr_is_virtual     = Bool() // Virtual address, we got a TLB miss
+  val data                = Valid(UInt)
+
+  val committed           = Bool() // committed by ROB
+  val succeeded           = Bool() // D$ has ack'd this, we don't need to maintain this anymore
 }
