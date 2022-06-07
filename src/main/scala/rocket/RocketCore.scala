@@ -195,6 +195,13 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val mem_ctrl = Reg(new IntCtrlSigs)
   val wb_ctrl = Reg(new IntCtrlSigs)
 
+  //SM: add store queue to buffer store
+  val numStqEntries     = 8 // TODO add to general core param
+  val stqAddrSz         = log2Ceil(numStqEntries)
+  val stq               = Reg(Vec(numStqEntries, Valid(new STQEntry)))
+  val stq_head          = Reg(UInt(stqAddrSz.W)) // point to next store to clear from STQ (i.e., send to memory)
+  val stq_tail          = Reg(UInt(stqAddrSz.W))
+
   val ex_reg_xcpt_interrupt  = Reg(Bool())
   val ex_reg_valid           = Reg(Bool())
   val ex_reg_rvc             = Reg(Bool())
@@ -289,10 +296,6 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val ctrl_killd = Wire(Bool())
   val id_npc = (ibuf.io.pc.asSInt + ImmGen(IMM_UJ, id_inst(0))).asUInt
 
-  //SM: add store queue
-  var numStqEntries = 8.U
-  val stq = Reg(Vec(numStqEntries, Valid(new STQEntry)))
-
   val csr = Module(new CSRFile(perfEvents, coreParams.customCSRs.decls))
   val id_csr_en = id_ctrl.csr.isOneOf(CSR.S, CSR.C, CSR.W)
   val id_system_insn = id_ctrl.csr === CSR.I
@@ -384,6 +387,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     (mem_reg_valid && mem_ctrl.wxd && !mem_ctrl.mem, mem_waddr, wb_reg_wdata),
     (mem_reg_valid && mem_ctrl.wxd, mem_waddr, dcache_bypass_data))
   val id_bypass_src = id_raddr.map(raddr => bypass_sources.map(s => s._1 && s._2 === raddr))
+  // SM: TODO add store -load forward as one of bypass sources
+
+  // SM: schedule store buffer in decode stages
+  val stq_nonempty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) =/= 0.U
+  val stq_full = (stq_tail === stq_head)
+  val stq_empty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) === 0.U
 
   // execute stage
   val bypass_mux = bypass_sources.map(_._3)
@@ -901,6 +910,34 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   // don't let D$ go to sleep if we're probably going to use it soon
   io.dmem.keep_clock_enabled := ibuf.io.inst(0).valid && id_ctrl.mem && !csr.io.csr_stall
 
+  // SM: enqueue the store request into store buffer
+  when(ex_reg_valid && ex_ctrl.mem && !ex_reg_replay && !stq_full) // enqueue in EXE, we only know value of each rs and imm at this stage; we don't enqueue in replay to avoid repetition
+  {
+    var st_enq_idx = stq_tail
+    printf("Line 916: enqueue store value with enq_idx being %d.\n", st_enq_idx)
+    stq(st_enq_idx).valid           := true.B
+    stq(st_enq_idx).bits.addr.valid := true.B
+    stq(st_enq_idx).bits.data.valid := true.B
+    stq(st_enq_idx).bits.succeeded  := false.B
+    stq(st_enq_idx).bits.data.bits  := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
+    stq(st_enq_idx).bits.addr.bits  := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
+
+    stq_tail := WrapInc(stq_tail, numStqEntries)
+    
+  }
+
+  // SM: dequeue when WB stage confirms there's no D$ nack
+  when(wb_ctrl.mem && !io.dmem.resp.valid && !stq_empty){
+    printf("Line 931: dequeue store value with enq_idx being %d.\n", stq_head)
+    stq(stq_head).valid           := false.B
+    stq(stq_head).bits.addr.valid := false.B
+    stq(stq_head).bits.data.valid := false.B
+    stq(stq_head).bits.succeeded  := true.B
+
+    stq_head := WrapInc(stq_head, numStqEntries)
+  }
+
+
   io.rocc.cmd.valid := wb_reg_valid && wb_ctrl.rocc && !replay_wb_common
   io.rocc.exception := wb_xcpt && csr.io.status.xs.orR
   io.rocc.cmd.bits.status := csr.io.status
@@ -1103,12 +1140,30 @@ object ImmGen {
   }
 }
 
-class STQEntry(implicit p: Parameters)
-{
-  val addr                = Valid(UInt)
-  // val addr_is_virtual     = Bool() // Virtual address, we got a TLB miss
-  val data                = Valid(UInt)
+class STQBundle(implicit val p: Parameters) extends ParameterizedBundle
 
-  val committed           = Bool() // committed by ROB
+class STQEntry(implicit p: Parameters) extends CoreBundle()(p)
+{
+  val addr                = Valid(UInt(64.W))
+  val data                = Valid(UInt(64.W))
+  // val addr                = Valid(Reg(Bits()))
+  // val data                = Valid(Reg(Bits()))
   val succeeded           = Bool() // D$ has ack'd this, we don't need to maintain this anymore
+}
+
+/**
+ * Object to increment an input value, wrapping it if
+ * necessary.
+ */
+object WrapInc
+{
+  // "n" is the number of increments, so we wrap at n-1.
+  def apply(value: UInt, n: Int): UInt = {
+    if (isPow2(n)) {
+      (value + 1.U)(log2Ceil(n)-1,0)
+    } else {
+      val wrap = (value === (n-1).U)
+      Mux(wrap, 0.U, value + 1.U)
+    }
+  }
 }
