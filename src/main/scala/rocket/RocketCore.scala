@@ -393,8 +393,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
   // SM: schedule store buffer in decode stages
   val stq_nonempty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) =/= 0.U
-  // val stq_full = (stq_tail === stq_head)
-  val stq_full = RegInit(false.B)
+  // val stq_full = RegInit(false.B)
+  val stq_full = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_&&_) === 1.U
   val stq_empty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) === 0.U
 
   // execute stage
@@ -915,10 +915,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   io.dmem.keep_clock_enabled := ibuf.io.inst(0).valid && id_ctrl.mem && !csr.io.csr_stall
 
   // SM: enqueue the store request into store buffer in MEM stage
-  when(mem_reg_valid && mem_ctrl.mem && isWrite(mem_ctrl.mem_cmd) && !stq_full) // enqueue in EXE, we only know value of each rs and imm at this stage; we don't enqueue in replay to avoid repetition
+  when(ex_reg_valid && ex_ctrl.mem && isWrite(ex_ctrl.mem_cmd) && !stq_full) // enqueue in EXE, we only know value of each rs and imm at this stage; we don't enqueue in replay to avoid repetition
   {
     var st_enq_idx = stq_tail
-    printf("Line 916: enqueue store value with enq_idx being %d.\n", st_enq_idx)
+    // printf("Line 916: enqueue store value with enq_idx being %d.\n", st_enq_idx)
     stq(st_enq_idx).valid           := true.B
     stq(st_enq_idx).bits.addr.valid := true.B
     stq(st_enq_idx).bits.data.valid := true.B
@@ -927,12 +927,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     stq(st_enq_idx).bits.addr.bits  := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
 
     stq_tail := WrapInc(stq_tail, numStqEntries)
-    stq_full := WrapInc(st_enq_idx, numStqEntries) === stq_head
+    // stq_full := WrapInc(st_enq_idx, numStqEntries) === stq_head
   }
 
-  // SM: dequeue when WB stage confirms there's no D$ nack/miss
-  when(wb_reg_valid && wb_ctrl.mem && isWrite(wb_ctrl.mem_cmd) && io.dmem.resp.valid && stq(stq_head).valid){
-    printf("Line 931: dequeue store value with stq_head being %d.\n", stq_head)
+  // SM: dequeue when WB stage confirms there's no D$ nack/miss when no replay is required
+  when(wb_reg_valid && wb_ctrl.mem && isWrite(wb_ctrl.mem_cmd) && !replay_wb_common && stq(stq_head).valid){
+    // printf("Line 931: dequeue store value with stq_head being %d.\n", stq_head)
     stq(stq_head).valid           := false.B
     stq(stq_head).bits.addr.valid := false.B
     stq(stq_head).bits.data.valid := false.B
