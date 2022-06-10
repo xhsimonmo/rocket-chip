@@ -393,7 +393,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
   // SM: schedule store buffer in decode stages
   val stq_nonempty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) =/= 0.U
-  val stq_full = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_&&_) =/= 0.U
+  val stq_full = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_&&_) === 1.U
   val stq_empty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) === 0.U
   // when(stq_empty){printf("STQ is empty. \n")}
   when(stq_full){printf("STQ is full. \n")}
@@ -681,7 +681,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val wb_wxd = wb_reg_valid && wb_ctrl.wxd
   val wb_set_sboard = wb_ctrl.div || wb_dcache_miss || wb_ctrl.rocc
   // No Wb replay if we already buffer the nacked Store in STQ
-  val replay_wb_common = (io.dmem.s2_nack && !isWrite(wb_ctrl.mem_cmd)) || wb_reg_replay
+  // val replay_wb_common = (io.dmem.s2_nack && !isWrite(wb_ctrl.mem_cmd)) || wb_reg_replay
+  val replay_wb_common = io.dmem.s2_nack  || wb_reg_replay
   val replay_wb_rocc = wb_reg_valid && wb_ctrl.rocc && !io.rocc.cmd.ready
   val replay_wb = replay_wb_common || replay_wb_rocc
   take_pc_wb := replay_wb || wb_xcpt || csr.io.eret || wb_reg_flush_pipe
@@ -907,32 +908,32 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val stq_st_replay_mem = RegInit(false.B.asTypeOf(Bool()))
   //SM: we push the enqueued store to memory hierachy when free
   // TODO: consider case of having following write
-  when(ex_reg_valid && !ex_ctrl.mem && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex) 
-  {
-    io.dmem.req.valid     := stq(stq_head).valid
-    io.dmem.req.bits.tag  := stq(stq_head).bits.tag
-    io.dmem.req.bits.cmd  := stq(stq_head).bits.cmd
-    io.dmem.req.bits.size := stq(stq_head).bits.size 
-    io.dmem.req.bits.signed := stq(stq_head).bits.signed
-    io.dmem.req.bits.phys := Bool(false)
-    io.dmem.req.bits.addr := stq(stq_head).bits.addr.bits
-    io.dmem.req.bits.idx.foreach(_ := io.dmem.req.bits.addr)
-    io.dmem.req.bits.dprv := stq(stq_head).bits.dprv
-    io.dmem.req.bits.dv := stq(stq_head).bits.dv
-    // io.dmem.s1_data.data := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
-    io.dmem.s1_kill := false // no context of killing S1 or S2 stage req
-    io.dmem.s2_kill := false
-    io.dmem.keep_clock_enabled := true.B
+  // when(ex_reg_valid && !ex_ctrl.mem && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex) 
+  // {
+  //   io.dmem.req.valid     := stq(stq_head).valid
+  //   io.dmem.req.bits.tag  := stq(stq_head).bits.tag
+  //   io.dmem.req.bits.cmd  := stq(stq_head).bits.cmd
+  //   io.dmem.req.bits.size := stq(stq_head).bits.size 
+  //   io.dmem.req.bits.signed := stq(stq_head).bits.signed
+  //   io.dmem.req.bits.phys := Bool(false)
+  //   io.dmem.req.bits.addr := stq(stq_head).bits.addr.bits
+  //   io.dmem.req.bits.idx.foreach(_ := io.dmem.req.bits.addr)
+  //   io.dmem.req.bits.dprv := stq(stq_head).bits.dprv
+  //   io.dmem.req.bits.dv := stq(stq_head).bits.dv
+  //   // io.dmem.s1_data.data := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
+  //   io.dmem.s1_kill := false // no context of killing S1 or S2 stage req
+  //   io.dmem.s2_kill := false
+  //   io.dmem.keep_clock_enabled := true.B
     
-    stq_st_replay_ex := true.B
-  }
-  // We then pass on the store data from STQ to D$ on next MEM stage
-  .elsewhen(mem_reg_valid && !mem_ctrl.mem && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && stq_st_replay_ex){
-    io.dmem.s1_data.data := stq(stq_head).bits.data.bits
-    stq_st_replay_mem := true.B
-  }
-  .otherwise //execute normally if no pending store in buffer and no racing memory access
-  {
+  //   stq_st_replay_ex := true.B
+  // }
+  // // We then pass on the store data from STQ to D$ on next MEM stage
+  // .elsewhen(mem_reg_valid && !mem_ctrl.mem && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && stq_st_replay_ex){
+  //   io.dmem.s1_data.data := stq(stq_head).bits.data.bits
+  //   stq_st_replay_mem := true.B
+  // }
+  // .otherwise //execute normally if no pending store in buffer and no racing memory access
+  // {
     io.dmem.req.valid     := ex_reg_valid && ex_ctrl.mem
     io.dmem.req.bits.tag  := ex_dcache_tag
     io.dmem.req.bits.cmd  := ex_ctrl.mem_cmd
@@ -948,7 +949,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     io.dmem.s2_kill := false
     // don't let D$ go to sleep if we're probably going to use it soon
     io.dmem.keep_clock_enabled := ibuf.io.inst(0).valid && id_ctrl.mem && !csr.io.csr_stall
-  }
+  // }
 
   // SM: enqueue the addr store request into store buffer in EX stage, then data in MEM stage as Dcahce has 3 stages pipeline
   when(ex_reg_valid && ex_ctrl.mem && isWrite(ex_ctrl.mem_cmd) && !stq_full) 
@@ -978,7 +979,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     stq_ex_addr_enq := false.B
   }
   // Enqueue store data from previous EX stage
-  when(mem_reg_valid && mem_ctrl.mem && isWrite(mem_ctrl.mem_cmd) && stq_ex_addr_enq){ 
+  when(stq_ex_addr_enq){ 
     var s0_st_enq_idx = WrapDec(stq_tail, numStqEntries) // euque index of previous stage
     stq(s0_st_enq_idx).bits.data.bits  := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
     printf("Line 948: enqueue store DATA value with enq_idx being %d.\n", s0_st_enq_idx)
@@ -994,7 +995,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
       stq(stq_head).bits.stq_s2_nack  := false.B
       stq_head := WrapInc(stq_head, numStqEntries)
     }
-    .otherwise{
+    .elsewhen(io.dmem.s2_nack || !io.dmem.resp.valid){
+      printf("We found a NACK D$ response \n")
       stq(stq_head).bits.stq_s2_nack := true.B // we mark the head of FIFO queue to have received S2 nack response
     }
   }
