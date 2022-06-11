@@ -396,7 +396,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val stq_full = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_&&_) === 1.U
   val stq_empty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) === 0.U
   // when(stq_empty){printf("STQ is empty. \n")}
-  when(stq_full){printf("STQ is full. \n")}
+  // when(stq_full){printf("STQ is full. \n")}
 
   // execute stage
   val bypass_mux = bypass_sources.map(_._3)
@@ -955,7 +955,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   when(ex_reg_valid && ex_ctrl.mem && isWrite(ex_ctrl.mem_cmd) && !stq_full) 
   {
     var st_enq_idx = stq_tail
-    printf("Line 916: enqueue store ADDR value with enq_idx being %d.\n", st_enq_idx)
+    // printf("Line 916: enqueue store ADDR value with enq_idx being %d.\n", st_enq_idx)
     stq(st_enq_idx).valid           := true.B
     stq(st_enq_idx).bits.addr.valid := true.B
     stq(st_enq_idx).bits.data.valid := true.B
@@ -982,13 +982,13 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   when(stq_ex_addr_enq){ 
     var s0_st_enq_idx = WrapDec(stq_tail, numStqEntries) // euque index of previous stage
     stq(s0_st_enq_idx).bits.data.bits  := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
-    printf("Line 948: enqueue store DATA value with enq_idx being %d.\n", s0_st_enq_idx)
+    // printf("Line 948: enqueue store DATA value with enq_idx being %d.\n", s0_st_enq_idx)
   }
 
   // SM: dequeue when WB stage confirms there's no D$ nack/miss when no replay is required
   when(wb_reg_valid && wb_ctrl.mem && isWrite(wb_ctrl.mem_cmd) && stq(stq_head).valid){
     when((!io.dmem.s2_nack || io.dmem.resp.valid)){
-      printf("Line 955: dequeue store value with stq_head being %d.\n", stq_head)
+      // printf("Line 955: dequeue store value with stq_head being %d.\n", stq_head)
       stq(stq_head).valid           := false.B
       stq(stq_head).bits.addr.valid := false.B
       stq(stq_head).bits.data.valid := false.B
@@ -996,7 +996,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
       stq_head := WrapInc(stq_head, numStqEntries)
     }
     .elsewhen(io.dmem.s2_nack || !io.dmem.resp.valid){
-      printf("We found a NACK D$ response \n")
+      // printf("We found a NACK D$ response \n")
       stq(stq_head).bits.stq_s2_nack := true.B // we mark the head of FIFO queue to have received S2 nack response
     }
   }
@@ -1109,19 +1109,19 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   else {
-    // when (csr.io.trace(0).valid) {
-    //   printf("C%d: %d [%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
-    //      io.hartid, coreMonitorBundle.timer, coreMonitorBundle.valid,
-    //      coreMonitorBundle.pc,
-    //      Mux(wb_ctrl.wxd || wb_ctrl.wfd, coreMonitorBundle.wrdst, 0.U),
-    //      Mux(coreMonitorBundle.wrenx, coreMonitorBundle.wrdata, 0.U),
-    //      coreMonitorBundle.wrenx,
-    //      Mux(wb_ctrl.rxs1 || wb_ctrl.rfs1, coreMonitorBundle.rd0src, 0.U),
-    //      Mux(wb_ctrl.rxs1 || wb_ctrl.rfs1, coreMonitorBundle.rd0val, 0.U),
-    //      Mux(wb_ctrl.rxs2 || wb_ctrl.rfs2, coreMonitorBundle.rd1src, 0.U),
-    //      Mux(wb_ctrl.rxs2 || wb_ctrl.rfs2, coreMonitorBundle.rd1val, 0.U),
-    //      coreMonitorBundle.inst, coreMonitorBundle.inst)
-    // }
+    when (csr.io.trace(0).valid) {
+      printf("C%d: %d [%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
+         io.hartid, coreMonitorBundle.timer, coreMonitorBundle.valid,
+         coreMonitorBundle.pc,
+         Mux(wb_ctrl.wxd || wb_ctrl.wfd, coreMonitorBundle.wrdst, 0.U),
+         Mux(coreMonitorBundle.wrenx, coreMonitorBundle.wrdata, 0.U),
+         coreMonitorBundle.wrenx,
+         Mux(wb_ctrl.rxs1 || wb_ctrl.rfs1, coreMonitorBundle.rd0src, 0.U),
+         Mux(wb_ctrl.rxs1 || wb_ctrl.rfs1, coreMonitorBundle.rd0val, 0.U),
+         Mux(wb_ctrl.rxs2 || wb_ctrl.rfs2, coreMonitorBundle.rd1src, 0.U),
+         Mux(wb_ctrl.rxs2 || wb_ctrl.rfs2, coreMonitorBundle.rd1val, 0.U),
+         coreMonitorBundle.inst, coreMonitorBundle.inst)
+    }
   }
 
   // CoreMonitorBundle for late latency writes
