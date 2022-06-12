@@ -909,7 +909,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val stq_st_replay_mem = RegInit(false.B.asTypeOf(Bool()))
   //SM: we push the enqueued store to memory hierachy when free
   // TODO: consider case of having following write
-  when(ex_reg_valid && !ex_ctrl.mem && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex && !stq_st_replay_mem) 
+  when(ex_reg_valid && (!ex_ctrl.mem || isWrite(ex_ctrl.mem_cmd)) && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex && !stq_st_replay_mem) 
   {
     // printf("Line 914: REPLAY store entry from STQ at stq_head %d. \n", stq_head)
     io.dmem.req.valid     := stq(stq_head).valid
@@ -922,7 +922,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     io.dmem.req.bits.idx.foreach(_ := io.dmem.req.bits.addr)
     io.dmem.req.bits.dprv := stq(stq_head).bits.dprv
     io.dmem.req.bits.dv := stq(stq_head).bits.dv
-    // io.dmem.s1_data.data := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
+    // this s1_data is from previous cycle, do it to avoid killing previous store request
+    io.dmem.s1_data.data := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
     io.dmem.s1_kill := false // no context of killing S1 or S2 stage req
     io.dmem.s2_kill := false
     io.dmem.keep_clock_enabled := true.B
@@ -934,6 +935,11 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     io.dmem.s1_data.data := stq(stq_head).bits.data.bits
     stq_st_replay_mem := true.B
   }
+  // // SM: W -> W reorder; We also handle the case with a consecutive store with same address, we have to enqueue it and process the one at head instead
+  // .elsewhen(ex_reg_valid && ex_ctrl.mem && isWrite(ex_ctrl.mem_cmd) && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex && !stq_st_replay_mem)
+  // {
+
+  // }
   .otherwise //execute normally if no pending store in buffer and no racing memory access
   {
     io.dmem.req.valid     := ex_reg_valid && ex_ctrl.mem
