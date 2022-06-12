@@ -911,7 +911,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   // TODO: consider case of having following write
   when(ex_reg_valid && !ex_ctrl.mem && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex && !stq_st_replay_mem) 
   {
-    printf("Line 914: REPLAY store entry from STQ at stq_head %d. \n", stq_head)
+    // printf("Line 914: REPLAY store entry from STQ at stq_head %d. \n", stq_head)
     io.dmem.req.valid     := stq(stq_head).valid
     io.dmem.req.bits.tag  := stq(stq_head).bits.tag
     io.dmem.req.bits.cmd  := stq(stq_head).bits.cmd
@@ -957,7 +957,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   when(ex_reg_valid && ex_ctrl.mem && isWrite(ex_ctrl.mem_cmd) && !stq_full) 
   {
     var st_enq_idx = stq_tail
-    printf("Line 916: enqueue store ADDR value with enq_idx being %d.\n", st_enq_idx)
+    // printf("Line 916: enqueue store ADDR value with enq_idx being %d.\n", st_enq_idx)
     stq(st_enq_idx).valid           := true.B
     stq(st_enq_idx).bits.addr.valid := true.B
     stq(st_enq_idx).bits.data.valid := true.B
@@ -984,7 +984,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   when(stq_ex_addr_enq){ 
     var s0_st_enq_idx = WrapDec(stq_tail, numStqEntries) // euque index of previous stage
     stq(s0_st_enq_idx).bits.data.bits  := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
-    printf("Line 948: enqueue store DATA value with enq_idx being %d.\n", s0_st_enq_idx)
+    // printf("Line 948: enqueue store DATA value with enq_idx being %d.\n", s0_st_enq_idx)
   }
 
   // SM: dequeue when WB stage confirms there's no D$ nack/miss when no replay is required, and this store isn't from replaying queue
@@ -1007,7 +1007,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   .elsewhen(stq_st_replay_ex && stq_st_replay_mem)
   {
     when((!io.dmem.s2_nack || io.dmem.resp.valid)){
-      printf("Line 955: dequeue store value with REPLAY stq_head being %d.\n", stq_head)
+      // printf("Line 955: dequeue store value with REPLAY stq_head being %d.\n", stq_head)
       stq(stq_head).valid           := false.B
       stq(stq_head).bits.addr.valid := false.B
       stq(stq_head).bits.data.valid := false.B
