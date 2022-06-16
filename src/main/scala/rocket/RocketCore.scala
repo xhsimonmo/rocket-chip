@@ -909,16 +909,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val stq_st_replay_ex = RegInit(false.B.asTypeOf(Bool()))
   val stq_st_replay_mem = RegInit(false.B.asTypeOf(Bool()))
   val stq_st_replay_entry  = RegInit(0.U.asTypeOf(UInt(stqAddrSz.W)))
-  val st_enq_idx = RegInit(0.U.asTypeOf(UInt(stqAddrSz.W)))
-  // val s0_st_enq_idx = RegInit(0.U.asTypeOf(UInt(stqAddrSz.W)))
-  //SM: dequeue store to memory hierachy when free
 
-  when(ex_reg_valid && (!isRead(ex_ctrl.mem_cmd)) && !stq_empty && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack  && !stq_st_replay_ex && !stq_st_replay_mem) 
-  // when(false)
+  //SM: dequeue store to memory hierachy when free
+  when(ex_reg_valid && (!isRead(ex_ctrl.mem_cmd)) && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex && !stq_st_replay_mem) 
   {
     // printf("Line 917: REPLAY store entry from STQ at stq_head %d. \n", stq_head)
     io.dmem.req.valid     := !stq(stq_head).bits.stq_s1_kill
-    // io.dmem.req.valid     := true.B
     io.dmem.req.bits.tag  := stq(stq_head).bits.tag
     io.dmem.req.bits.cmd  := stq(stq_head).bits.cmd
     io.dmem.req.bits.size := stq(stq_head).bits.size 
@@ -966,7 +962,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   // SM: enqueue the addr store request into store buffer in EX stage, then data in MEM stage as Dcahce has 3 stages pipeline
   when(ex_reg_valid && ex_ctrl.mem && isWrite(ex_ctrl.mem_cmd) && !stq_full) 
   { 
-    st_enq_idx := stq_tail
+    var st_enq_idx := stq_tail
     // printf("Line 916: enqueue store ADDR value with enq_idx being %d.\n", st_enq_idx)
     stq(st_enq_idx).valid           := false.B
     stq(st_enq_idx).bits.addr.valid := true.B
@@ -977,13 +973,11 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     stq(st_enq_idx).bits.size := ex_reg_mem_size
     stq(st_enq_idx).bits.signed := !Mux(ex_reg_hls, ex_reg_inst(20), ex_reg_inst(14))
     stq(st_enq_idx).bits.addr.bits := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
-    // stq(st_enq_idx).bits.idx.foreach(_ := stq(st_enq_idx).bits.addr)
     stq(st_enq_idx).bits.io_addr := io.dmem.req.bits.addr
     stq(st_enq_idx).bits.dprv := Mux(ex_reg_hls, csr.io.hstatus.spvp, csr.io.status.dprv)
     stq(st_enq_idx).bits.dv := ex_reg_hls || csr.io.status.dv
-    stq(st_enq_idx).bits.stq_s1_kill := true.B // SM debug: by default we assume this entry should be killed
+    stq(st_enq_idx).bits.stq_s1_kill := true.B // SM : by default we assume this entry should be killed
     stq(st_enq_idx).bits.stq_s2_nack := false.B
-    // stq(st_enq_idx).bits.s1_kill := false // no context when we replay the queue entry, hench no s1_s2 kill
 
     stq_tail := WrapInc(stq_tail, numStqEntries)
     stq_ex_addr_enq := true.B
@@ -998,40 +992,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     stq(s0_st_enq_idx).bits.data.bits  := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
     // printf("Line 948: enqueue store DATA value with enq_idx being %d.\n", s0_st_enq_idx)
     // the enqueueing store request should be killed and dequeue next cycle
-    // when(killm_common || mem_ldst_xcpt || fpu_kill_mem){
-    //   stq(s0_st_enq_idx).bits.stq_s1_kill := true.B
-    // }
     stq(s0_st_enq_idx).bits.stq_s1_kill := killm_common || mem_ldst_xcpt || fpu_kill_mem
-    // stq(s0_st_enq_idx).valid := true.B
   }
 
   // SM: dequeue when WB stage confirms there's no D$ nack/miss when no replay is required, and this store isn't from replaying queue
   // Alternatively, dequeue if S1_kill signal is asserted in previous MEM stage 
-  when(wb_ctrl.mem && isWrite(wb_ctrl.mem_cmd) && stq(stq_head).valid){
-    when(!io.dmem.s2_nack || io.dmem.resp.valid || stq(stq_head).bits.stq_s1_kill){
-      // printf("Line 955: dequeue store value with stq_head being %d.\n", stq_head)
-      stq(stq_head).valid           := false.B
-      stq(stq_head).bits.addr.valid := false.B
-      stq(stq_head).bits.data.valid := false.B
-      stq(stq_head).bits.stq_s1_kill  := false.B
-      stq(stq_head).bits.stq_s2_nack  := false.B
-      // stq_tail := dequeue_tail
-      stq_head := WrapInc(stq_head, numStqEntries)
-    }
-    .elsewhen(io.dmem.s2_nack || !io.dmem.resp.valid){
-      // printf("We found a NACK D$ response \n")
-      stq(stq_head).bits.stq_s2_nack := true.B // we mark the head of FIFO queue to have received S2 nack response
-      stq(stq_head).valid := true.B
-    }
-    when(stq_st_replay_ex && stq_st_replay_mem){
-      stq_st_replay_ex := false.B
-      stq_st_replay_mem := false.B
-    }
-  }
-  // When the store is from STQ and replayed successful
-  // .elsewhen(wb_reg_valid && (!wb_ctrl.mem || isWrite(wb_ctrl.mem_cmd)) && stq_st_replay_ex && stq_st_replay_mem)
-  .elsewhen( (!wb_ctrl.mem ) && stq_st_replay_ex && stq_st_replay_mem)
-  // when(stq_st_replay_ex && stq_st_replay_mem)
+  when(stq_st_replay_ex && stq_st_replay_mem)
   {
     when(!io.dmem.s2_nack || io.dmem.resp.valid || stq(stq_head).bits.stq_s1_kill){
       // printf("Line 955: dequeue store value with REPLAY stq_head being %d.\n", stq_head)
@@ -1315,6 +1281,4 @@ class STQEntry(implicit p: Parameters) extends CoreBundle()(p)
   val stq_s1_kill         = Bool()
   val stq_s2_nack         = Bool() // D$ has negative ack'd this, this needs to be reexecute
   val io_addr             = UInt(64.W)
-  // val stq_st_replay_ex    = Bool()
-  // val stq_st_replay_mem
 }
