@@ -911,7 +911,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val stq_st_replay_entry  = RegInit(0.U.asTypeOf(UInt(stqAddrSz.W)))
 
   //SM: dequeue store to memory hierachy when free
+  // Arch4
   when(ex_reg_valid && (!isRead(ex_ctrl.mem_cmd)) && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex && !stq_st_replay_mem) 
+  // Arch5
+  // when(ex_reg_valid && !ex_ctrl.mem && stq(stq_head).valid && stq(stq_head).bits.stq_s2_nack && !stq_st_replay_ex && !stq_st_replay_mem)
   {
     // printf("Line 917: REPLAY store entry from STQ at stq_head %d. \n", stq_head)
     io.dmem.req.valid     := !stq(stq_head).bits.stq_s1_kill
@@ -962,22 +965,22 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   // SM: enqueue the addr store request into store buffer in EX stage, then data in MEM stage as Dcahce has 3 stages pipeline
   when(ex_reg_valid && ex_ctrl.mem && isWrite(ex_ctrl.mem_cmd) && !stq_full) 
   { 
-    var st_enq_idx := stq_tail
+    // var st_enq_idx = stq_tail
     // printf("Line 916: enqueue store ADDR value with enq_idx being %d.\n", st_enq_idx)
-    stq(st_enq_idx).valid           := false.B
-    stq(st_enq_idx).bits.addr.valid := true.B
-    stq(st_enq_idx).bits.data.valid := true.B
-    stq(st_enq_idx).bits.addr.bits  := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
-    stq(st_enq_idx).bits.tag  := ex_dcache_tag
-    stq(st_enq_idx).bits.cmd  := ex_ctrl.mem_cmd
-    stq(st_enq_idx).bits.size := ex_reg_mem_size
-    stq(st_enq_idx).bits.signed := !Mux(ex_reg_hls, ex_reg_inst(20), ex_reg_inst(14))
-    stq(st_enq_idx).bits.addr.bits := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
-    stq(st_enq_idx).bits.io_addr := io.dmem.req.bits.addr
-    stq(st_enq_idx).bits.dprv := Mux(ex_reg_hls, csr.io.hstatus.spvp, csr.io.status.dprv)
-    stq(st_enq_idx).bits.dv := ex_reg_hls || csr.io.status.dv
-    stq(st_enq_idx).bits.stq_s1_kill := true.B // SM : by default we assume this entry should be killed
-    stq(st_enq_idx).bits.stq_s2_nack := false.B
+    stq(stq_tail).valid           := false.B
+    stq(stq_tail).bits.addr.valid := true.B
+    stq(stq_tail).bits.data.valid := true.B
+    stq(stq_tail).bits.addr.bits  := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
+    stq(stq_tail).bits.tag  := ex_dcache_tag
+    stq(stq_tail).bits.cmd  := ex_ctrl.mem_cmd
+    stq(stq_tail).bits.size := ex_reg_mem_size
+    stq(stq_tail).bits.signed := !Mux(ex_reg_hls, ex_reg_inst(20), ex_reg_inst(14))
+    stq(stq_tail).bits.addr.bits := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
+    stq(stq_tail).bits.io_addr := io.dmem.req.bits.addr
+    stq(stq_tail).bits.dprv := Mux(ex_reg_hls, csr.io.hstatus.spvp, csr.io.status.dprv)
+    stq(stq_tail).bits.dv := ex_reg_hls || csr.io.status.dv
+    stq(stq_tail).bits.stq_s1_kill := true.B // SM : by default we assume this entry should be killed
+    stq(stq_tail).bits.stq_s2_nack := false.B
 
     stq_tail := WrapInc(stq_tail, numStqEntries)
     stq_ex_addr_enq := true.B
